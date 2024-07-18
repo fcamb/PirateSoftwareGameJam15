@@ -1,0 +1,35 @@
+@TODO
+
+CURRENT:
+  - make sure it compiles and works on web lol
+  - map scene
+  - change menu structs to have one color
+    - just check for color in update loop
+    
+TODO:
+  - controls menu
+  - game settings
+  - battle scene
+  - map scene
+  - items
+  - stats
+  - inventory story
+  - create the art for the game
+  - create the sound for the game
+  - input
+  
+MOSTLY DONE:
+  
+DONE:
+
+MEMORY ALLOCATIONS:
+  - the Player
+  - the Enemies
+  - (NOT ALLOCATED BUT PAY ATTENTION TO IT) the game text
+    - static buffer, might take up a lot of memory
+  - Game Map and Game Map Nodes
+
+NOTES:
+  - Everything is one source file right now
+  - All data is global right now (only one source file)
+  
