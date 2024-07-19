@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include "../raylibIncludes/raylib.h"
+#include "../raylibIncludes/raymath.h"
 
 /* DEFINES */
 #if defined(PLATFORM_WEB)
@@ -69,21 +70,35 @@ typedef struct OptionsMenu
   Vector2 goBackToMainMenuTextPosition;
 } OptionsMenu;
 
+typedef struct GameMapTile
+{
+  int type;
+  Rectangle tileRect;
+  Color tileColor;
+} GameMapTile;
+
 typedef struct GameState
 {
   bool running;
   Vector2i screenSize;
+
+  Vector2 previousMousePosition;
+  Vector2 mousePosition;
   
   MainMenu mainMenu;
   OptionsMenu optionsMenu;
   ControlsMenu controlsMenu;
   GameSettings gameSettings;
+  GameMapTile** gameMap;
   
   bool mainMenuActive;
   bool optionsMenuActive;
   bool controlsMenuActive;
-  bool craftingSceneActive;
+  bool craftingInventoryActive;
   bool inventoryActive;
+  bool gameActive;
+  
+  const char* gameText[9];
 } GameState;
 
 /* TYPES */
@@ -102,7 +117,7 @@ typedef enum TextNames
 
 typedef struct Item
 {
-  const char* name;
+  //const char* name;
   Rectangle rect;
   Texture2D texture;
 } Item;
@@ -110,32 +125,40 @@ typedef struct Item
 typedef struct Inventory
 {
   Rectangle rect;
+  Rectangle dragRect;
   Texture2D texture;
-  Item items[MAX_INVENTORY_ITEMS];
+  Item* items;
+  bool dragging;
 } Inventory;
 
 typedef struct Player
 {
   Vector2 size;
   Texture2D texture;
-  Inventory inventory;
+  Inventory* inventory;
+  Inventory* craftingInventory;
+  int recentInventoryOpened;
 } Player;
 
 
 /* OBJECTS */
 GameState* gameState;
 Player* player;
-const char* gameText[9]; // not sure what final size of this will be
+
 
 /* INITIALIZATION */
 void AllocateGame();
 void InitGame(bool resettingSizes);
-void CreatePlayer();
+void InitGameMap(bool resettingSizes);
+void CreatePlayer(bool resettingSize);
 
 /* GENERAL FUNCIONS THAT CONTROL THE FLOW OF THE GAME */
 void UnloadGame();
 void RenderGame();
 void UpdateGame();
+
+/* UTILITY */
+void LoadCSVGameMap(const char *path, GameMapTile** mapBuffer);
 
 /* UPDATE FUNCTIONS */
 void UpdateScreenSize();
@@ -144,6 +167,7 @@ void UpdateOptionsMenu();
 void UpdateControlsMenu();
 void UpdateCraftingScene();
 void UpdateInventory();
+void UpdateGameMap();
   
 /* RENDER FUNCTIONS */
 void RenderMainMenu();
@@ -151,6 +175,7 @@ void RenderOptionsMenu();
 void RenderControlsMenu();
 void RenderCraftingScene();
 void RenderInventory();
+void RenderGameMap();
 
 int
 main()
@@ -173,7 +198,8 @@ main()
   SetTargetFPS(60);
 
   InitGame(false);
-  CreatePlayer();
+  InitGameMap(false);
+  CreatePlayer(false);
   
   while(!WindowShouldClose() && gameState->running) {
     UpdateGame();
@@ -189,16 +215,6 @@ main()
 void
 AllocateGame()
 {
-  gameText[START_GAME] = "Start Game";
-  gameText[OPTIONS] = "Options";
-  gameText[EXIT_GAME] = "Exit Game";
-  gameText[SOUND] = "Sound";
-  gameText[CONTROLS] = "Controls";
-  gameText[MAIN_MENU] = "Main Menu";
-  gameText[INVENTORY] = "Inventory";
-  gameText[CRAFTING] = "Crafting";
-  gameText[MAP] = "Map";
-
   /* ALLOCATTE MEMORY FOR ALL POINTERS FIRST */
   gameState = malloc(sizeof(GameState));
   if (!gameState) {
@@ -209,14 +225,25 @@ AllocateGame()
     exit(1);
   }
   
+  gameState->gameText[START_GAME] = "Start Game";
+  gameState->gameText[OPTIONS] = "Options";
+  gameState->gameText[EXIT_GAME] = "Exit Game";
+  gameState->gameText[SOUND] = "Sound";
+  gameState->gameText[CONTROLS] = "Controls";
+  gameState->gameText[MAIN_MENU] = "Main Menu";
+  gameState->gameText[INVENTORY] = "Inventory";
+  gameState->gameText[CRAFTING] = "Crafting";
+  gameState->gameText[MAP] = "Map";
+  
   gameState->running = true;
   gameState->screenSize = (Vector2i){1920,1080};
   gameState->mainMenuActive = true;
-  gameState->battleSceneActive = false;
-  gameState->mapSceneActive = false;
   gameState->optionsMenuActive = false;
   gameState->controlsMenuActive = false;
-
+  gameState->gameActive = false;
+  gameState->inventoryActive = false;
+  gameState->craftingInventoryActive = false;
+  
   /* Game Settings */
   gameState->gameSettings.soundOn = true;
   
@@ -228,33 +255,52 @@ AllocateGame()
 #endif
     exit(1);
   }
-  gameMap = malloc(sizeof(GameMap));
-  if (!gameMap) {
+  player->inventory = malloc(sizeof(Inventory));
+  if (!player->inventory) {
 #ifdef DEBUG
-    printf("Failed to allocate game map memory.\n");
+    printf("Failed to allocated player inventory memory.\n");
     exit(1);
 #endif
   }
-  gameMap->gameMapNodes = malloc(sizeof(GameMapNode) * DEFAULT_MAP_SIZE);
-  if (!gameMap->gameMapNodes) {
+  player->inventory->items = NULL;
+  player->craftingInventory = malloc(sizeof(Inventory));
+  if (!player->craftingInventory) {
 #ifdef DEBUG
-    printf("Failed to allocate game map nodes memory.\n");
+    printf("Failed to allocate player crafting inventory memory.\n");
     exit(1);
 #endif
   }
-  gameState->battleScene.defaultRectsBuffer = malloc(sizeof(Rectangle)*DEFAULT_BATTLE_SCENE_RECTS_COUNT);
-  if (!gameState->battleScene.defaultRectsBuffer) {
+  player->craftingInventory->items = NULL;
+  player->inventory->items = malloc(sizeof(Item)*MAX_INVENTORY_ITEMS);
+  if (!player->inventory->items) {
 #ifdef DEBUG
-    printf("Failed to allocate battle scene default buffer.\n");
+    printf("Failed to allocated player inventory items memory.\n");
     exit(1);
 #endif
   }
-  gameState->battleScene.extraRectsBuffer = malloc(sizeof(Rectangle));
-  if (!gameState->battleScene.extraRectsBuffer) {
+  player->craftingInventory->items = malloc(sizeof(Item)*MAX_INVENTORY_ITEMS);
+  if (!player->craftingInventory->items) {
 #ifdef DEBUG
-    printf("Failed to allocate battle scene extra buffer.\n");
+    printf("Failed to allocate player crafting inventory items memory.\n");
     exit(1);
 #endif
+  }
+  
+  gameState->gameMap = malloc(sizeof(GameMapTile*)*10);
+  if (!gameState->gameMap) {
+#ifdef DEBUG
+    printf("Failed to allocate inital game map memory.\n");
+    exit(1);
+#endif
+  }
+  for (int i = 0; i < 10; i++) {
+    gameState->gameMap[i] = malloc(sizeof(GameMapTile) * 10);
+    if (!gameState->gameMap[i]) {
+#ifdef DEBUG
+      printf("Failed to allocate map row memory.\n");
+      exit(1);
+#endif
+    }
   }
 }
 
@@ -262,12 +308,12 @@ void
 InitGame(bool resettingSizes)
 {
   /* Minimum Screen Size */
-  if (gameState->screenSize.x < 800) {
-    return;
-  }
-  if (gameState->screenSize.y < 800) {
-    return;
-  }
+  /* if (gameState->screenSize.x < 800) { */
+  /*   return; */
+  /* } */
+  /* if (gameState->screenSize.y < 800) { */
+  /*   return; */
+  /* } */
   
   /* where all rects start from */
   float startX = gameState->screenSize.x/2.f;
@@ -281,9 +327,9 @@ InitGame(bool resettingSizes)
     gameState->mainMenu.exitGameRectColor =        RAYWHITE;
   }
   
-  Vector2 size1 = MeasureTextEx(GetFontDefault(), gameText[START_GAME], 40.f, 1.f);
-  Vector2 size2 = MeasureTextEx(GetFontDefault(), gameText[OPTIONS],    40.f, 1.f);
-  Vector2 size3 = MeasureTextEx(GetFontDefault(), gameText[EXIT_GAME],  40.f, 1.f);
+  Vector2 size1 = MeasureTextEx(GetFontDefault(), gameState->gameText[START_GAME], 40.f, 1.f);
+  Vector2 size2 = MeasureTextEx(GetFontDefault(), gameState->gameText[OPTIONS],    40.f, 1.f);
+  Vector2 size3 = MeasureTextEx(GetFontDefault(), gameState->gameText[EXIT_GAME],  40.f, 1.f);
   
   gameState->mainMenu.startGameRect =       (Rectangle){startX - (size1.x/2.f) - 10.f,
 						        startY - (size1.y/2.f) - 10.f,
@@ -307,9 +353,9 @@ InitGame(bool resettingSizes)
     gameState->optionsMenu.goBackToMainMenuRectColor = RAYWHITE;
   }
   
-  size1 = MeasureTextEx(GetFontDefault(), gameText[SOUND], 40.f, 1.f);
-  size2 = MeasureTextEx(GetFontDefault(), gameText[CONTROLS], 40.f, 1.f);
-  size3 = MeasureTextEx(GetFontDefault(), gameText[MAIN_MENU], 40.f, 1.f);
+  size1 = MeasureTextEx(GetFontDefault(), gameState->gameText[SOUND], 40.f, 1.f);
+  size2 = MeasureTextEx(GetFontDefault(), gameState->gameText[CONTROLS], 40.f, 1.f);
+  size3 = MeasureTextEx(GetFontDefault(), gameState->gameText[MAIN_MENU], 40.f, 1.f);
   
   gameState->optionsMenu.soundToggleRect =     (Rectangle){startX - (size1.x/2.f) - 10.f,
 						 	   startY - (size1.y/2.f) - 10.f,
@@ -326,129 +372,59 @@ InitGame(bool resettingSizes)
   gameState->optionsMenu.goBackToMainMenuTextPosition = (Vector2){gameState->optionsMenu.goBackToMainMenuRect.x + 10.f, gameState->optionsMenu.goBackToMainMenuRect.y + 10.f};
 
 
-  /* GAME MAP STUFF */
-  if (resettingSizes) {
-    CreateGameMap(true);
-  } else {
-    CreateGameMap(false);
-  }
-
-  if (resettingSizes) {
-    InitBattleScene(true);
-  } else {
-    InitBattleScene(false);
-  }
+  /* Initial Mouse Position */
+  gameState->mousePosition = GetMousePosition();
 }
 
 void
-InitBattleScene(bool resettingSizes)
+InitGameMap(bool resettingSize)
 {
-  gameState->battleScene.fontSize = 40.f;
   /* Minimum Screen Size */
-  if (gameState->screenSize.x < 800) {
-    return;
-  }
-  if (gameState->screenSize.y < 800) {
-    return;
-  }
+  /* if (gameState->screenSize.x < 800) { */
+  /*   return; */
+  /* } */
+  /* if (gameState->screenSize.y < 800) { */
+  /*   return; */
+  /* } */
   
-  // x scale percentage = 19.6
-  // y scale percentage = 5.4
-  /* health bar(s) positions */
-  float healthBarWidth = (float)gameState->screenSize.x / 3.f;
-  float healthBarHeight = (float)gameState->screenSize.y / 14.f;
-  float startXleft = gameState->screenSize.x / 19.6f;
-  float startYleft = (float)gameState->screenSize.y - 200.f;
-  float startXright = (float)gameState->screenSize.x - healthBarWidth - 100.f;
-  float startYright = gameState->screenSize.y / 5.4f;
-  
-  Rectangle healthBarOne = (Rectangle){startXleft, startYleft, healthBarWidth, healthBarHeight};
-  Rectangle healthBarTwo = (Rectangle){startXright, startYright, healthBarWidth, healthBarHeight};
-
-  gameState->battleScene.defaultRectsBuffer[0] = healthBarOne;
-  gameState->battleScene.defaultRectsBuffer[1] = healthBarTwo;
-
-  if (!resettingSizes) {
-    gameState->battleScene.gotoInventoryRectColor = RAYWHITE;
-    gameState->battleScene.gotoCraftingSceneColor = RAYWHITE;
-    gameState->battleScene.gotoMapSceneRectColor =  RAYWHITE;
+  if (!resettingSize) {
+#if defined (PLATFORM_WEB)
+    LoadCSVGameMap("gameMap.csv", gameState->gameMap);
+#else
+    LoadCSVGameMap("src/gameMap.csv", gameState->gameMap);
+#endif	
   }
 
-  Vector2 size1 = MeasureTextEx(GetFontDefault(), gameText[INVENTORY], 40.f, 1.f);
-  Vector2 size2 = MeasureTextEx(GetFontDefault(), gameText[CRAFTING],  40.f, 1.f);
-  Vector2 size3 = MeasureTextEx(GetFontDefault(), gameText[MAP],       40.f, 1.f);
-
-  gameState->battleScene.gotoInventoryRect =     (Rectangle){100, 10, size1.x, size1.y};
-  gameState->battleScene.gotoCraftingSceneRect = (Rectangle){gameState->battleScene.gotoInventoryRect.x + gameState->battleScene.gotoInventoryRect.width + 10.f,
-							     10, size2.x, size2.y};
-  gameState->battleScene.gotoMapSceneRect =      (Rectangle){gameState->battleScene.gotoCraftingSceneRect.x + gameState->battleScene.gotoCraftingSceneRect.width + 10.f,
-							     10, size3.x, size3.y};
-
-  gameState->battleScene.gotoInventoryTextPosition =     (Vector2){gameState->battleScene.gotoInventoryRect.x,     gameState->battleScene.gotoInventoryRect.y};
-  gameState->battleScene.gotoCraftingSceneTextPosition = (Vector2){gameState->battleScene.gotoCraftingSceneRect.x, gameState->battleScene.gotoCraftingSceneRect.y};
-  gameState->battleScene.gotoMapSceneTextPosition =      (Vector2){gameState->battleScene.gotoMapSceneRect.x,      gameState->battleScene.gotoMapSceneRect.y};
-
+  // x scale factor 60
+  // y scale factor = 33.47
+  float tileWidth = gameState->screenSize.x / 10.f;
+  float tileHeight = gameState->screenSize.y / 10.f;
+  for (int y = 0; y < 10; y++) {
+    for (int x = 0 ; x < 10; x++) {
+      gameState->gameMap[y][x].tileRect = (Rectangle){x * tileWidth, y*tileHeight,tileWidth, tileHeight};
+    }
+  }
 }
 
 void
-CreatePlayer()
+CreatePlayer(bool resettingSize)
 {
-  memset(&player->inventory.items, 0, sizeof(player->inventory.items));
-  player->size = (Vector2){32.f, 32.f};
-  memset(&player->texture, 0, sizeof(Texture2D));
+  if (!resettingSize) {
+    memset(player->inventory->items, 0, MAX_INVENTORY_ITEMS);
+    memset(player->craftingInventory->items, 0, MAX_INVENTORY_ITEMS);
+    player->size = (Vector2){32.f, 32.f};
+    memset(&player->texture, 0, sizeof(Texture2D));
+    player->recentInventoryOpened = 0;
+  }
 
-  player->stats.health = 10;
-  player->stats.mana = 10;
-  player->stats.attackPower = 20;
-  player->stats.spellPower = 20;
-  player->stats.attackDefense = 10;
-  player->stats.spellDefense = 10;
-  player->stats.speed = 5;
+  player->inventory->rect = (Rectangle){0.f, 10.f, 800.f, 800.f};
+  player->inventory->dragRect = (Rectangle){0.f, 10.f, 800.f, 10.f};
+  player->craftingInventory->rect = (Rectangle){0.f, 10.f, 800.f, 800.f};
+  player->craftingInventory->dragRect = (Rectangle){0.f, 10.f, 800.f, 10.f};
+  player->inventory->dragging = false;
+  player->craftingInventory->dragging = false;
 }
 
-void
-CreateGameMap(bool resettingSizes)
-{
-  // x scale percentage = 9.6
-  // y scale percentage = 5.4
-  float startX = gameState->screenSize.x/2.f;
-  float currentX = startX;
-  float offsetX = gameState->screenSize.x / 9.6f;
-  float startY =  (float)gameState->screenSize.y - 180.f;
-  float offsetY = gameState->screenSize.y / 5.4f;
-  
-  int i = 0;
-  for (i = 0; i < DEFAULT_MAP_SIZE; i++) {  
-    currentX = startX;
-    if ((i+1) % 2 == 0) {
-      currentX = startX + offsetX;
-      offsetX *= -1.f;
-    }
-    
-    gameMap->gameMapNodes[i].nodePositionRect = (Rectangle){currentX - 50.f, startY, 100.f, 100.f};
-    startY -= offsetY;
-    
-    if (!resettingSizes) {
-      gameMap->gameMapNodes[i].data=0;
-      if (i == DEFAULT_MAP_SIZE - 1) {
-	gameMap->gameMapNodes[i].name = "BOSS";
-	gameMap->gameMapNodes[i].type = 1;
-	gameMap->gameMapNodes[i].nodePositionRectColor = RED;
-      } else {
-	gameMap->gameMapNodes[i].name = "BASIC";
-	gameMap->gameMapNodes[i].type = 0;
-	gameMap->gameMapNodes[i].nodePositionRectColor = BLUE;
-      }
-    }
-  }
-  
-  if (!resettingSizes) {
-    gameMap->gameMapSize = DEFAULT_MAP_SIZE;
-    gameMap->playerPositionInGameMap = 0;
-    /* Set to -1 to start */
-    gameMap->mouseHoverIndex = -1;
-  }
-}
 
 void
 UnloadGame()
@@ -458,13 +434,10 @@ UnloadGame()
 #endif
   
   free(player);
-
-  free(gameMap->gameMapNodes);
-  free(gameMap);
-
-  free(gameState->battleScene.defaultRectsBuffer);
-  free(gameState->battleScene.extraRectsBuffer);
-
+  for (int i = 0; i < 10; i++) {
+    free(gameState->gameMap[i]);
+  }
+  free(gameState->gameMap);
   free(gameState);
 }
 
@@ -483,7 +456,7 @@ UpdateScreenSize()
   {
     SetWindowSize(gameState->screenSize.x, gameState->screenSize.y);
     InitGame(true); // true - were resetting the size of all the rects
-    InitBattleScene(true); // true - were resetting the size of all the rects
+    InitGameMap(true); // true - were resetting the size of all the rects
   }
 }
 
@@ -491,8 +464,14 @@ void
 UpdateGame()
 {
   UpdateScreenSize();
+
+  gameState->previousMousePosition = gameState->mousePosition;
+  gameState->mousePosition = GetMousePosition();
   
-  if (gameState->mainMenuActive) {
+  if (gameState->gameActive) {
+    UpdateGameMap();
+  }
+  else if (gameState->mainMenuActive) {
     UpdateMainMenu();
   }
   else if (gameState->optionsMenuActive) {
@@ -501,19 +480,31 @@ UpdateGame()
   else if (gameState->controlsMenuActive) {
     UpdateControlsMenu();
   }
-  else if (gameState->battleSceneActive) {
-    UpdateBattleScene();
-  }
-  else if (gameState->mapSceneActive) {
-    UpdateMapScene();
-  }
 
+  /* OPEN CRAFTING */
+  if (IsKeyPressed(KEY_I)) {
+    if (gameState->inventoryActive) {
+      gameState->inventoryActive = false;
+    } else {
+      player->recentInventoryOpened = 1;
+      gameState->inventoryActive = true;
+    }
+  }
+  /* OPEN CRAFTING */
+  if (IsKeyPressed(KEY_C)) {
+    if (gameState->craftingInventoryActive) {
+      gameState->craftingInventoryActive = false;
+    } else {
+      player->recentInventoryOpened = 1;
+      gameState->craftingInventoryActive = true;
+    }
+  }
   /*
     I want these to be able to run no matter what
      except for when main,options,controls menus are open
      not sure how to handle that yet
   */
-  if (gameState->craftingSceneActive) {
+  if (gameState->craftingInventoryActive) {
     UpdateCraftingScene();
   }
   if (gameState->inventoryActive) {
@@ -528,7 +519,10 @@ RenderGame()
   {
     ClearBackground(RAYWHITE);
     //DrawRectangle(100, 100, player->size.x, player->size.y, PURPLE);
-    if (gameState->mainMenuActive) {
+    if (gameState->gameActive) {
+      RenderGameMap();
+    }
+    else if (gameState->mainMenuActive) {
       RenderMainMenu();
     }
     else if (gameState->optionsMenuActive) {
@@ -537,19 +531,22 @@ RenderGame()
     else if (gameState->controlsMenuActive) {
       RenderControlsMenu();
     }
-    else if (gameState->battleSceneActive) {
-      RenderBattleScene();
-    }
-    else if (gameState->mapSceneActive) {
-      RenderMapScene();
-    }
-
     /* These are able to run no matter what, same as in UpdateGame function */
-    if (gameState->craftingSceneActive) {
-      RenderCraftingScene();
+    if (player->recentInventoryOpened == 1) {// crafting inventroy is open
+      if (gameState->inventoryActive) {
+	RenderInventory();
+      }
+      if (gameState->craftingInventoryActive) {
+	RenderCraftingScene();
+      }
     }
-    if (gameState->inventoryActive) {
-      RenderInventory();
+    else if (player->recentInventoryOpened == 0) { // basic inventory is open
+      if (gameState->craftingInventoryActive) {
+	RenderCraftingScene();
+      }
+      if (gameState->inventoryActive) {
+        RenderInventory();
+      }
     }
   }
   EndDrawing();
@@ -558,27 +555,25 @@ RenderGame()
 void
 UpdateMainMenu()
 {
-  Vector2 mousePosition = GetMousePosition();
-
   gameState->mainMenu.startGameRectColor =       RAYWHITE;
   gameState->mainMenu.gotoOptionsMenuRectColor = RAYWHITE;
   gameState->mainMenu.exitGameRectColor =        RAYWHITE;
   
-  if (CheckCollisionPointRec(mousePosition, gameState->mainMenu.startGameRect)) {
+  if (CheckCollisionPointRec(gameState->mousePosition, gameState->mainMenu.startGameRect)) {
     gameState->mainMenu.startGameRectColor = BLACK;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       gameState->mainMenuActive = false;
-      gameState->mapSceneActive = true;
+      gameState->gameActive = true;
     }
   }
-  else if (CheckCollisionPointRec(mousePosition, gameState->mainMenu.gotoOptionsMenuRect)) {
+  else if (CheckCollisionPointRec(gameState->mousePosition, gameState->mainMenu.gotoOptionsMenuRect)) {
     gameState->mainMenu.gotoOptionsMenuRectColor = BLACK;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       gameState->mainMenuActive = false;
       gameState->optionsMenuActive = true;
     }
   }
-  else if (CheckCollisionPointRec(mousePosition, gameState->mainMenu.exitGameRect)) {
+  else if (CheckCollisionPointRec(gameState->mousePosition, gameState->mainMenu.exitGameRect)) {
     gameState->mainMenu.exitGameRectColor = BLACK;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       gameState->running = false;
@@ -594,21 +589,20 @@ RenderMainMenu()
   DrawRectangleLinesEx(gameState->mainMenu.startGameRect,       1.f, gameState->mainMenu.startGameRectColor);
   DrawRectangleLinesEx(gameState->mainMenu.gotoOptionsMenuRect, 1.f, gameState->mainMenu.gotoOptionsMenuRectColor);
   DrawRectangleLinesEx(gameState->mainMenu.exitGameRect,        1.f, gameState->mainMenu.exitGameRectColor);
-  DrawTextEx(GetFontDefault(), gameText[START_GAME], gameState->mainMenu.startGameTextPosition,    gameState->mainMenu.fontSize, 1.f, BLACK);
-  DrawTextEx(GetFontDefault(), gameText[OPTIONS], gameState->mainMenu.gotoOptionsMenuTextPosition, gameState->mainMenu.fontSize, 1.f, BLACK);
-  DrawTextEx(GetFontDefault(), gameText[EXIT_GAME], gameState->mainMenu.exitGameTextPosition,      gameState->mainMenu.fontSize, 1.f, BLACK);
+  DrawTextEx(GetFontDefault(), gameState->gameText[START_GAME], gameState->mainMenu.startGameTextPosition,    gameState->mainMenu.fontSize, 1.f, BLACK);
+  DrawTextEx(GetFontDefault(), gameState->gameText[OPTIONS], gameState->mainMenu.gotoOptionsMenuTextPosition, gameState->mainMenu.fontSize, 1.f, BLACK);
+  DrawTextEx(GetFontDefault(), gameState->gameText[EXIT_GAME], gameState->mainMenu.exitGameTextPosition,      gameState->mainMenu.fontSize, 1.f, BLACK);
 }
 
 void
 UpdateOptionsMenu()
 {
-  Vector2 mousePosition = GetMousePosition();
-
+  
   gameState->optionsMenu.controlsMenuRectColor =     RAYWHITE;
   gameState->optionsMenu.soundToggleRectColor =      RAYWHITE;
   gameState->optionsMenu.goBackToMainMenuRectColor = RAYWHITE;
 
-  if (CheckCollisionPointRec(mousePosition, gameState->optionsMenu.soundToggleRect)) {
+  if (CheckCollisionPointRec(gameState->mousePosition, gameState->optionsMenu.soundToggleRect)) {
     gameState->optionsMenu.soundToggleRectColor = BLACK;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       if (gameState->gameSettings.soundOn) {
@@ -619,14 +613,14 @@ UpdateOptionsMenu()
       printf("Changing sound setting - %d\n", gameState->gameSettings.soundOn);
     }
   }
-  else if (CheckCollisionPointRec(mousePosition, gameState->optionsMenu.controlsMenuRect)) {
+  else if (CheckCollisionPointRec(gameState->mousePosition, gameState->optionsMenu.controlsMenuRect)) {
     gameState->optionsMenu.controlsMenuRectColor = BLACK;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       gameState->optionsMenuActive = false;
       gameState->controlsMenuActive = true;
     }
   }
-  else if (CheckCollisionPointRec(mousePosition, gameState->optionsMenu.goBackToMainMenuRect)) {
+  else if (CheckCollisionPointRec(gameState->mousePosition, gameState->optionsMenu.goBackToMainMenuRect)) {
     gameState->optionsMenu.goBackToMainMenuRectColor = BLACK;
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
       gameState->optionsMenuActive = false;
@@ -642,98 +636,148 @@ RenderOptionsMenu()
   DrawRectangleLinesEx(gameState->optionsMenu.soundToggleRect,      1.f,  gameState->optionsMenu.soundToggleRectColor);
   DrawRectangleLinesEx(gameState->optionsMenu.controlsMenuRect,     1.f,  gameState->optionsMenu.controlsMenuRectColor);
   DrawRectangleLinesEx(gameState->optionsMenu.goBackToMainMenuRect, 1.f,  gameState->optionsMenu.goBackToMainMenuRectColor);
-  DrawTextEx(GetFontDefault(), gameText[SOUND],     gameState->optionsMenu.soundToggleTextPosition,      gameState->optionsMenu.fontSize, 1.f, BLACK);
-  DrawTextEx(GetFontDefault(), gameText[CONTROLS],  gameState->optionsMenu.controlsMenuTextPosition,     gameState->optionsMenu.fontSize, 1.f, BLACK);
-  DrawTextEx(GetFontDefault(), gameText[MAIN_MENU], gameState->optionsMenu.goBackToMainMenuTextPosition, gameState->optionsMenu.fontSize, 1.f, BLACK);
+  DrawTextEx(GetFontDefault(), gameState->gameText[SOUND],     gameState->optionsMenu.soundToggleTextPosition,      gameState->optionsMenu.fontSize, 1.f, BLACK);
+  DrawTextEx(GetFontDefault(), gameState->gameText[CONTROLS],  gameState->optionsMenu.controlsMenuTextPosition,     gameState->optionsMenu.fontSize, 1.f, BLACK);
+  DrawTextEx(GetFontDefault(), gameState->gameText[MAIN_MENU], gameState->optionsMenu.goBackToMainMenuTextPosition, gameState->optionsMenu.fontSize, 1.f, BLACK);
 }
 
 void UpdateControlsMenu() {}
 void RenderControlsMenu() {}
 
-void UpdateBattleScene()
+void UpdateCraftingScene()
 {
-  Vector2 mousePosition = GetMousePosition();
-
-  gameState->battleScene.gotoInventoryRectColor = RAYWHITE;
-  gameState->battleScene.gotoCraftingSceneColor = RAYWHITE;
-  gameState->battleScene.gotoMapSceneRectColor =  RAYWHITE;
+  if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && player->craftingInventory->dragging) {
+    Vector2 difference = Vector2Subtract(gameState->mousePosition, gameState->previousMousePosition);
+    player->craftingInventory->rect.x += difference.x;
+    player->craftingInventory->rect.y += difference.y;
+    player->craftingInventory->dragRect.x += difference.x;
+    player->craftingInventory->dragRect.y += difference.y;
+  }
   
-  if (CheckCollisionPointRec(mousePosition, gameState->battleScene.gotoInventoryRect)) {
-    gameState->battleScene.gotoInventoryRectColor = BLACK;
+  if (CheckCollisionPointRec(gameState->mousePosition, player->craftingInventory->dragRect)) {
     if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      gameState->inventoryActive = true;
+      player->recentInventoryOpened = 1; // crafting inventory is open
+      player->craftingInventory->dragging = true;
+    } 
+  }
+  
+  if (CheckCollisionPointRec(gameState->mousePosition, player->craftingInventory->rect)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+      player->recentInventoryOpened = 1;
     }
   }
-  else if (CheckCollisionPointRec(mousePosition, gameState->battleScene.gotoCraftingSceneRect)) {
-    gameState->battleScene.gotoCraftingSceneColor = BLACK;
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      gameState->craftingSceneActive = true;
-    }
-  }
-  else if (CheckCollisionPointRec(mousePosition, gameState->battleScene.gotoMapSceneRect)) {
-    gameState->battleScene.gotoMapSceneRectColor = BLACK;
-    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-      gameState->battleSceneActive = false;
-      gameState->mapSceneActive = true;
-    }
+
+  if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+    player->craftingInventory->dragging = false;
   }
 }
 
-void RenderBattleScene()
+void RenderCraftingScene()
 {
-  for (int i = 0; i < DEFAULT_BATTLE_SCENE_RECTS_COUNT; i++) {
-    DrawRectangleRec(gameState->battleScene.defaultRectsBuffer[i], GREEN);  
-  }
-
-  DrawRectangleLinesEx(gameState->battleScene.gotoInventoryRect,     1.f, gameState->battleScene.gotoInventoryRectColor);
-  DrawRectangleLinesEx(gameState->battleScene.gotoCraftingSceneRect, 1.f, gameState->battleScene.gotoCraftingSceneColor);
-  DrawRectangleLinesEx(gameState->battleScene.gotoMapSceneRect,      1.f, gameState->battleScene.gotoMapSceneRectColor);
-  DrawTextEx(GetFontDefault(), gameText[INVENTORY], gameState->battleScene.gotoInventoryTextPosition,     gameState->battleScene.fontSize, 1.f, BLACK);
-  DrawTextEx(GetFontDefault(), gameText[CRAFTING],  gameState->battleScene.gotoCraftingSceneTextPosition, gameState->battleScene.fontSize, 1.f, BLACK);
-  DrawTextEx(GetFontDefault(), gameText[MAP],       gameState->battleScene.gotoMapSceneTextPosition,      gameState->battleScene.fontSize, 1.f, BLACK);
+  DrawRectangleRec(player->craftingInventory->rect,     BROWN);
+  DrawRectangleRec(player->craftingInventory->dragRect, BLACK);
 }
 
-void UpdateCraftingScene() {}
-void RenderCraftingScene() {}
+void UpdateInventory()
+{
+  if (IsMouseButtonDown(MOUSE_BUTTON_LEFT) && player->inventory->dragging) {
+    Vector2 difference = Vector2Subtract(gameState->mousePosition, gameState->previousMousePosition);
+    player->inventory->rect.x += difference.x;
+    player->inventory->rect.y += difference.y;
+    player->inventory->dragRect.x += difference.x;
+    player->inventory->dragRect.y += difference.y;
+  }
 
-void UpdateInventory() {}
-void RenderInventory() {}
+  if (CheckCollisionPointRec(gameState->mousePosition, player->inventory->dragRect)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+      player->inventory->dragging = true;
+      player->recentInventoryOpened = 0;
+    }
+  }
+  
+  if (CheckCollisionPointRec(gameState->mousePosition, player->inventory->rect)) {
+    if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
+      player->recentInventoryOpened = 0;
+    }
+  }
 
-void
-UpdateMapScene()
+  if (!IsMouseButtonDown(MOUSE_BUTTON_LEFT)) {
+    player->inventory->dragging = false;
+  }
+}
+void RenderInventory()
+{
+  DrawRectangleRec(player->inventory->rect,     PURPLE);
+  DrawRectangleRec(player->inventory->dragRect, BLACK);
+}
+
+void UpdateGameMap()
 {
   Vector2 mousePosition = GetMousePosition();
-
-  gameMap->mouseHoverIndex = -1;
-
-  for (int i = 0; i < gameMap->gameMapSize; i++) {
-
-    if (i == gameMap->gameMapSize - 1) { // BOSS NODE - final node
-      gameMap->gameMapNodes[i].nodePositionRectColor = RED;
-    } else {
-      gameMap->gameMapNodes[i].nodePositionRectColor = BLUE;
-    }
-    
-    if (CheckCollisionPointRec(mousePosition, gameMap->gameMapNodes[i].nodePositionRect)) {
-      gameMap->mouseHoverIndex = i;
-      if (IsMouseButtonPressed(MOUSE_BUTTON_LEFT)) {
-	gameMap->playerPositionInGameMap = i;
-	gameMap->gameMapNodes[i].nodePositionRectColor = GREEN;
-	gameState->mapSceneActive = false;
-	gameState->battleSceneActive = true;
+  for (int y = 0; y < 10; y++) {
+    for (int x = 0; x < 10; x++) {
+      if (CheckCollisionPointRec(mousePosition, gameState->gameMap[y][x].tileRect)) {
+	gameState->gameMap[y][x].tileColor = RED;
+      } else {
+	gameState->gameMap[y][x].tileColor = BLACK;
       }
     }
   }
 }
 
 void
-RenderMapScene()
+RenderGameMap()
 {
-  for (int i = 0; i < gameMap->gameMapSize; i++) {
-    DrawRectangleRec(gameMap->gameMapNodes[i].nodePositionRect, gameMap->gameMapNodes[i].nodePositionRectColor);
+  for (int y = 0; y < 10; y++) {
+    for (int x = 0; x < 10; x++) {
+      DrawRectangleLinesEx(gameState->gameMap[y][x].tileRect, 1.f, gameState->gameMap[y][x].tileColor);
+    }
   }
+}
+
+void
+LoadCSVGameMap(const char* path, GameMapTile** mapBuffer)
+{
+  FILE* file = fopen(path, "r");
+  if (!file) {
+#ifdef DEBUG
+    printf("Failed to open map csv file.\n");
+    exit(1);
+#endif
+  }
+
+  /* This will be based on size of map*/
+  char line[25];
+  char* linePtr;
+  int x = 0;
+  int y = 0;
+  int data = 0;
   
-  if (gameMap->mouseHoverIndex >= 0 && gameMap->mouseHoverIndex < gameMap->gameMapSize) {
-    DrawRectangleLinesEx(gameMap->gameMapNodes[gameMap->mouseHoverIndex].nodePositionRect, 5.f, YELLOW);
+  while (fgets(line, sizeof(line), file)) {
+    linePtr = &line[0];
+    
+    while(*linePtr != '\n') {
+      
+      if (*linePtr != ',' && *linePtr != ' ') {
+	data = data * 10 + (*linePtr - 48);
+      }
+      else if (*linePtr == ',') {
+	mapBuffer[y][x++].type = data;
+	data = 0;
+      }
+      
+      linePtr++;
+    }
+    
+    mapBuffer[y][x].type = data;
+    data = 0;
+    y++;
+    x=0;
   }
+
+  fclose(file);
+  
+#ifdef DEBUG
+  printf("Map loaded.\n");
+#endif
 }
