@@ -155,6 +155,8 @@ void RenderInventory();
 int
 main()
 {
+  printf("Game Start/n");
+
   AllocateGame();
   /*
     Get Screen Size from browser first, this is necessary to scale game
