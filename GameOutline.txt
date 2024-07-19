@@ -22,16 +22,21 @@
 
 
 - Game Idea 1 -
-	- strategy game, rogue-like(for simplicity) -
-	- similar to pokemon, darkest dungeon, slay the spire -
-	- build a team or just one player -
-	- skills, abilities, items, revolve around alchemy -
-	- alchemical process to make skills, abilities, items, etc
-		- Materials dropped from game used to do this
-	- Main goal is to climb the shadow tower -
-	- theme tie in -> shadow king creates shadow tower shadowing the main tower of the world
-		- goal is to fight through shadow tower and stop shadow king
-	- enemies in the shadow tower are shades, wraiths, etc. -
-	- main boss is shadow king -
-	...
+  - strategy game, rogue-like(for simplicity) -
+  - similar to pokemon, darkest dungeon, slay the spire -
+  - build a team or just one player -
+  - skills, abilities, items, revolve around alchemy -
+  - alchemical process to make skills, abilities, items, etc
+  - Materials dropped from game used to do this
+  - maybe the alchemy could be about crafting shadow monsters for your team
+  - Main goal is to climb the shadow tower -
+  - theme tie in -> shadow king creates shadow tower shadowing the main tower of the world
+  - goal is to fight through shadow tower and stop shadow king
+  - enemies in the shadow tower are shades, wraiths, etc. -
+  - main boss is shadow king
+  ...
+	
+- Game Idea 2 -
+  - shadow wizard arpg
+  - 
 	 

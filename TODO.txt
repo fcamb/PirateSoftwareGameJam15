@@ -1,24 +1,27 @@
 @TODO
+^ means its mostly done
 
 CURRENT:
-  - make sure it compiles and works on web lol
-  - map scene
-  - change menu structs to have one color
-    - just check for color in update loop
-    
+  - figure out good way to store text data for the game
+    - and how to access the data correctly
+  
 TODO:
+^ - make sure it compiles and works on web lol
   - controls menu
   - game settings
-  - battle scene
-  - map scene
+  - crafting scene
   - items
-  - stats
-  - inventory story
+  - inventory
   - create the art for the game
   - create the sound for the game
   - input
-  
+  - player data
+^ - make size/position of everything scale properly to screen size
+    - down to a minimum size
+^ - figure out good way to store text data for the game
+    - and how to access the data correctly
 MOSTLY DONE:
+  - compiles to web
   
 DONE:
 
@@ -28,7 +31,11 @@ MEMORY ALLOCATIONS:
   - (NOT ALLOCATED BUT PAY ATTENTION TO IT) the game text
     - static buffer, might take up a lot of memory
   - Game Map and Game Map Nodes
-
+  - battleScene default buffer
+    - deafult buffer data
+  - battleScene extra buffer
+   - extra buffer data
+   
 NOTES:
   - Everything is one source file right now
   - All data is global right now (only one source file)
